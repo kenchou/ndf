@@ -1,16 +1,19 @@
 #![allow(non_snake_case)]
 
-// use colored::*;
+const MAX_CHARS: u8 = 20;
+
+use colored::*;
 use sysinfo::{DiskExt, SystemExt};
 use std::ffi::{OsString};
 
 fn get_frac(avail: &u64, total: &u64) -> f64 {
-    if *total == 0 {
+    if *total == 0 { // Prevent divide by 0.
         return 0 as f64;
     }
 
-    let x = (avail/total) as f64;
-    return x.ceil();
+    return (*avail as f64/
+        *total as f64
+    ) as f64;
 }
 
 struct NDFDisk {
@@ -31,7 +34,13 @@ impl NDFDisk {
             },
             Err(_) => panic!("No name for disk.")
         }
+    }
+    fn create_bar(&self) -> String {
+        let chars_num = ((MAX_CHARS as f64*self.space_asfrac).ceil()) as usize;
+        let chars = "▓".repeat(chars_num);
+        let rem = "░".repeat((MAX_CHARS - chars_num as u8) as usize);
 
+        format!("{}{}", chars, rem)
     }
 }
 
@@ -43,6 +52,6 @@ fn main() {
     };
 
     for disk in disks.into_iter() {
-        println!("{}, {:?}", disk.name, disk.space_asfrac);
+        println!("{}: {}", disk.name, disk.create_bar());
     }
 }
