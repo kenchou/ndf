@@ -5,6 +5,7 @@ const MAX_CHARS: usize = 50; // Max number of characters for the disk's availabl
 use colored::*;
 use sysinfo::{DiskExt, SystemExt};
 use std::ffi::{OsString};
+use std::env;
 
 fn get_frac(avail: &u64, total: &u64) -> f64 {
     if *total == 0 { // Prevent divide by 0.
@@ -50,13 +51,36 @@ impl NDFDisk {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    let mut compactmode = false;
+
+    match args.get(1) {
+        Some(val) => {
+            if val == "compact" {
+                compactmode = true;
+            }
+        },
+        None => {
+            ();
+        }
+    }
+
     let sys = sysinfo::System::new();
     let mut disks: Vec<NDFDisk> = Vec::new();
     for disk in sys.get_disks() {
         disks.push(NDFDisk::create_NDFDisk(disk));
     };
 
-    for disk in disks.into_iter() {
-        println!("{} @ {}\n{} {:.0}%\n", disk.name, disk.mnt, disk.create_bar(), disk.space_asfrac*100 as f64);
+    println!("{}", "\nndf - nice disk free".bold());
+
+    if compactmode {
+        for disk in disks.into_iter() {
+            println!("{}: {} {:.0}%", disk.name, disk.create_bar(), disk.space_asfrac*100 as f64);
+        }
+    } else {
+        for disk in disks.into_iter() {
+            println!("{} @ {}\n{} {:.0}%\n", disk.name, disk.mnt, disk.create_bar(), disk.space_asfrac*100 as f64);
+        }
     }
 }
