@@ -18,7 +18,8 @@ fn get_frac(avail: &u64, total: &u64) -> f64 {
 
 struct NDFDisk {
     name: String,
-    space_asfrac: f64
+    space_asfrac: f64,
+    mnt: String
 }
 
 impl NDFDisk {
@@ -29,18 +30,25 @@ impl NDFDisk {
             Ok(s) => {
                 NDFDisk {
                     name: s,
-                    space_asfrac: frac
+                    space_asfrac: frac,
+                    mnt: disk.get_mount_point().display().to_string()
                 }
             },
             Err(_) => panic!("No name for disk.")
         }
     }
-    fn create_bar(&self) -> String {
+    fn create_bar(&self) -> colored::ColoredString {
         let chars_num = ((MAX_CHARS as f64*self.space_asfrac).ceil()) as usize;
         let chars = "▓".repeat(chars_num);
-        let rem = "░".repeat((MAX_CHARS - chars_num as u8) as usize);
+        let rem_num = (MAX_CHARS - chars_num as u8) as usize;
+        let rem = "░".repeat(rem_num);
 
-        format!("{}{}", chars, rem)
+        if rem_num < 3 {
+            format!("{}{}", chars, rem).red()
+        } else {
+            format!("{}{}", chars, rem).green()
+        }
+
     }
 }
 
@@ -52,6 +60,6 @@ fn main() {
     };
 
     for disk in disks.into_iter() {
-        println!("{}: {}", disk.name, disk.create_bar());
+        println!("{} @ {}\n{} {:.0}%\n", disk.name, disk.mnt, disk.create_bar(), disk.space_asfrac*100 as f64);
     }
 }
