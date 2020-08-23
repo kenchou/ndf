@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-const MAX_CHARS: u8 = 20;
+const MAX_CHARS: usize = 50; // Max number of characters for the disk's available space bar.
 
 use colored::*;
 use sysinfo::{DiskExt, SystemExt};
@@ -11,9 +11,7 @@ fn get_frac(avail: &u64, total: &u64) -> f64 {
         return 0 as f64;
     }
 
-    return (*avail as f64/
-        *total as f64
-    ) as f64;
+    return 1 as f64 - (*avail as f64/ *total as f64);
 }
 
 struct NDFDisk {
@@ -40,15 +38,14 @@ impl NDFDisk {
     fn create_bar(&self) -> colored::ColoredString {
         let chars_num = ((MAX_CHARS as f64*self.space_asfrac).ceil()) as usize;
         let chars = "▓".repeat(chars_num);
-        let rem_num = (MAX_CHARS - chars_num as u8) as usize;
+        let rem_num = (MAX_CHARS - chars_num) as usize;
         let rem = "░".repeat(rem_num);
 
-        if rem_num < 3 {
+        if rem_num < (MAX_CHARS as f64 * 0.2) as usize {
             format!("{}{}", chars, rem).red()
         } else {
             format!("{}{}", chars, rem).green()
         }
-
     }
 }
 
