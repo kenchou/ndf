@@ -26,8 +26,8 @@ impl NDFDisk {
             mnt: disk.mount_point().to_string_lossy().to_string(),
         }
     }
-    fn create_bar(&self) -> colored::ColoredString {
-        let chars_num = ((MAX_CHARS as f64 * self.space_asfrac).ceil()) as usize;
+    fn create_bar(&self) -> ColoredString {
+        let chars_num = (MAX_CHARS as f64 * self.space_asfrac).ceil() as usize;
         let chars = "▓".repeat(chars_num);
         let rem_num = MAX_CHARS - chars_num;
         let rem = "░".repeat(rem_num);
@@ -42,11 +42,11 @@ impl NDFDisk {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mut compactmode = false;
+    let mut compact_mode = false;
 
     if let Some(val) = args.get(1) {
         if val == "compact" {
-            compactmode = true;
+            compact_mode = true;
         }
     }
 
@@ -57,7 +57,7 @@ fn main() {
 
     println!("{}", "\nndf - nice disk free".bold());
 
-    if compactmode {
+    if compact_mode {
         for disk in disks.into_iter() {
             println!(
                 "{}: {} {:.0}%",
