@@ -52,7 +52,8 @@ fn main() {
 
     let mut disks: Vec<NDFDisk> = Vec::new();
     for disk in Disks::new_with_refreshed_list().list() {
-        if disk.file_system() == "overlay" {
+        // ignore overlay and snap mounts
+        if disk.file_system() == "overlay" || disk.mount_point().starts_with("/var/snap/") {
             continue;
         }
         disks.push(NDFDisk::create_ndf_disk(disk));
