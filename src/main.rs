@@ -51,7 +51,10 @@ fn main() {
     }
 
     let mut disks: Vec<NDFDisk> = Vec::new();
-    for disk in &Disks::new_with_refreshed_list() {
+    for disk in Disks::new_with_refreshed_list().list() {
+        if disk.file_system() == "overlay" {
+            continue;
+        }
         disks.push(NDFDisk::create_ndf_disk(disk));
     }
 
