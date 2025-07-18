@@ -1,8 +1,7 @@
-use clap::{Arg, Command, value_parser, ValueEnum};
+use clap::{value_parser, Arg, Command, ValueEnum};
 use colored::*;
 use std::collections::HashSet;
 use sysinfo::Disks;
-use tabled::{Table, Tabled};
 
 const MAX_CHARS: usize = 50;
 
@@ -52,6 +51,19 @@ impl NDFDisk {
             format!("{}{}", chars, rem).green()
         }
     }
+
+    fn create_plain_bar(&self) -> String {
+        let chars_num = (MAX_CHARS as f64 * self.space_as_frac).ceil() as usize;
+        let chars = "▓".repeat(chars_num);
+        let rem_num = MAX_CHARS - chars_num;
+        let rem = "░".repeat(rem_num);
+        format!("{}{}", chars, rem)
+    }
+
+    fn is_high_usage(&self) -> bool {
+        let rem_num = MAX_CHARS - (MAX_CHARS as f64 * self.space_as_frac).ceil() as usize;
+        rem_num < (MAX_CHARS as f64 * 0.2) as usize
+    }
 }
 
 fn format_size(size: u64) -> String {
@@ -68,31 +80,14 @@ fn format_size(size: u64) -> String {
     }
 }
 
-
-#[derive(Tabled)]
-struct DiskRow {
-    #[tabled(rename = "Mount")]
-    mnt: String,
-    #[tabled(rename = "Size")]
-    size: String,
-    #[tabled(rename = "Free")]
-    free: String,
-    #[tabled(rename = "Usage")]
-    usage: String,
-    #[tabled(rename = "Name")]
-    name: String,
-}
-
-
 fn main() {
     let matches = Command::new("ndf")
         .about("Nice disk free.")
         .arg(
-            Arg::new("output")
-                .long("output")
+            Arg::new("mode")
                 .value_parser(value_parser!(OutputMode))
-                .default_value("normal")
-                .help("Output mode: normal | compact | table"),
+                .default_value("table")
+                .help("Display mode: normal | compact | table"),
         )
         .arg(
             Arg::new("only-mp")
@@ -108,7 +103,7 @@ fn main() {
         )
         .get_matches();
 
-    let output_mode = *matches.get_one::<OutputMode>("output").unwrap();
+    let output_mode = *matches.get_one::<OutputMode>("mode").unwrap();
 
     let only_mp: Option<HashSet<_>> = matches
         .get_one::<String>("only-mp")
@@ -152,18 +147,63 @@ fn main() {
             }
         }
         OutputMode::Table => {
-            let rows: Vec<DiskRow> = disks
-                .iter()
-                .map(|disk| DiskRow {
-                    mnt: disk.mnt.clone(),
-                    size: format_size(disk.size),
-                    free: format_size(disk.free),
-                    usage: format!("{} {:>3.0}%", disk.create_bar(), disk.space_as_frac * 100.0),
-                    name: disk.name.clone(),
-                })
-                .collect();
-            let table = Table::new(rows);
-            println!("{}", table);
+            // 手动创建表格以正确处理颜色
+            println!(
+                "┌{:─<22}┬{:─<10}┬{:─<10}┬{:─<56}┬{:─<14}┐",
+                "", "", "", "", ""
+            );
+            println!(
+                "│ {:<20} │ {:>8} │ {:>8} │ {:^54} │ {:<12} │",
+                "Mount", "Size", "Free", "Usage", "Name"
+            );
+            println!(
+                "├{:─<22}┼{:─<10}┼{:─<10}┼{:─<56}┼{:─<14}┤",
+                "", "", "", "", ""
+            );
+
+            for disk in disks {
+                let mount_col = format!(
+                    "│ {:<20} │",
+                    if disk.mnt.len() > 20 {
+                        disk.mnt[..17].to_string() + "..."
+                    } else {
+                        disk.mnt.clone()
+                    }
+                );
+                let size_col = format!(" {:>8} │", format_size(disk.size));
+                let free_col = format!(" {:>8} │", format_size(disk.free));
+                let name_col = format!(
+                    " {:<12} │",
+                    if disk.name.len() > 12 {
+                        disk.name[..9].to_string() + "..."
+                    } else {
+                        disk.name.clone()
+                    }
+                );
+
+                // 构建Usage列内容：1空格 + 50字符进度条 + 1空格 + 3字符百分比 + 1空格 = 56字符
+                // 但我们用{:>3}格式化百分比，实际上是：1空格 + 50字符进度条 + 1空格 + 右对齐3字符百分比 + 1空格 = 55字符
+                let plain_bar = disk.create_plain_bar();
+                let percentage = format!("{:.0}%", disk.space_as_frac * 100.0);
+
+                let colored_bar = if disk.is_high_usage() {
+                    plain_bar.red()
+                } else {
+                    plain_bar.green()
+                };
+
+                let usage_final = format!(" {} {:>3} │", colored_bar, percentage);
+
+                // 手动打印每行，不使用格式化来处理颜色部分
+                print!("{}{}{}", mount_col, size_col, free_col);
+                print!("{}", usage_final);
+                println!("{}", name_col);
+            }
+
+            println!(
+                "└{:─<22}┴{:─<10}┴{:─<10}┴{:─<56}┴{:─<14}┘",
+                "", "", "", "", ""
+            );
         }
         OutputMode::Normal => {
             for disk in disks {
