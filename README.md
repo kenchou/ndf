@@ -15,12 +15,16 @@ A modern, colorful disk usage utility written in Rust. `ndf` provides a clean an
 
 ### From Source
 
+Clone this repository and build:
+
 ```bash
-git clone https://github.com/{{owner}}/{{repo}}.git
+git clone https://github.com/kiobu/ndf.git
 cd ndf
 cargo build --release
 cargo install --path .
 ```
+
+Or use the "Clone" button above to get the current repository URL.
 
 ## Usage
 
