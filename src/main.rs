@@ -147,42 +147,66 @@ fn main() {
             }
         }
         OutputMode::Table => {
-            // 手动创建表格以正确处理颜色
+            // 计算每列的最大宽度
+            let mut max_mount_len = "Mount".len();
+            let mut max_size_len = "Size".len();
+            let mut max_free_len = "Free".len();
+            let mut max_name_len = "Name".len();
+
+            for disk in &disks {
+                max_mount_len = max_mount_len.max(disk.mnt.len().min(20));
+                max_size_len = max_size_len.max(format_size(disk.size).len());
+                max_free_len = max_free_len.max(format_size(disk.free).len());
+                max_name_len = max_name_len.max(disk.name.len().min(15));
+            }
+
+            // Usage列固定为进度条宽度 + 百分比
+            let usage_len = MAX_CHARS + 4; // 50字符进度条 + 空格 + 3字符百分比
+
+            // 手动创建表格
             println!(
-                "┌{:─<22}┬{:─<10}┬{:─<10}┬{:─<56}┬{:─<14}┐",
-                "", "", "", "", ""
+                "┌{:─<width_mount$}┬{:─<width_size$}┬{:─<width_free$}┬{:─<width_usage$}┬{:─<width_name$}┐",
+                "", "", "", "", "",
+                width_mount = max_mount_len + 2,
+                width_size = max_size_len + 2,
+                width_free = max_free_len + 2,
+                width_usage = usage_len + 2,
+                width_name = max_name_len + 2
             );
             println!(
-                "│ {:<20} │ {:>8} │ {:>8} │ {:^54} │ {:<12} │",
-                "Mount", "Size", "Free", "Usage", "Name"
+                "│ {:<width_mount$} │ {:>width_size$} │ {:>width_free$} │ {:^width_usage$} │ {:<width_name$} │",
+                "Mount", "Size", "Free", "Usage", "Name",
+                width_mount = max_mount_len,
+                width_size = max_size_len,
+                width_free = max_free_len,
+                width_usage = usage_len,
+                width_name = max_name_len
             );
             println!(
-                "├{:─<22}┼{:─<10}┼{:─<10}┼{:─<56}┼{:─<14}┤",
-                "", "", "", "", ""
+                "├{:─<width_mount$}┼{:─<width_size$}┼{:─<width_free$}┼{:─<width_usage$}┼{:─<width_name$}┤",
+                "", "", "", "", "",
+                width_mount = max_mount_len + 2,
+                width_size = max_size_len + 2,
+                width_free = max_free_len + 2,
+                width_usage = usage_len + 2,
+                width_name = max_name_len + 2
             );
 
             for disk in disks {
-                let mount_col = format!(
-                    "│ {:<20} │",
-                    if disk.mnt.len() > 20 {
-                        disk.mnt[..17].to_string() + "..."
-                    } else {
-                        disk.mnt.clone()
-                    }
-                );
-                let size_col = format!(" {:>8} │", format_size(disk.size));
-                let free_col = format!(" {:>8} │", format_size(disk.free));
-                let name_col = format!(
-                    " {:<12} │",
-                    if disk.name.len() > 12 {
-                        disk.name[..9].to_string() + "..."
-                    } else {
-                        disk.name.clone()
-                    }
-                );
+                let mount_text = if disk.mnt.len() > 20 {
+                    disk.mnt[..17].to_string() + "..."
+                } else {
+                    disk.mnt.clone()
+                };
+                let size_text = format_size(disk.size);
+                let free_text = format_size(disk.free);
+                let name_text = if disk.name.len() > 15 {
+                    disk.name[..12].to_string() + "..."
+                } else {
+                    disk.name.clone()
+                };
 
-                // 构建Usage列内容：1空格 + 50字符进度条 + 1空格 + 3字符百分比 + 1空格 = 56字符
-                // 但我们用{:>3}格式化百分比，实际上是：1空格 + 50字符进度条 + 1空格 + 右对齐3字符百分比 + 1空格 = 55字符
+                // 构建Usage列内容
                 let plain_bar = disk.create_plain_bar();
                 let percentage = format!("{:.0}%", disk.space_as_frac * 100.0);
 
@@ -192,17 +216,24 @@ fn main() {
                     plain_bar.green()
                 };
 
-                let usage_final = format!(" {} {:>3} │", colored_bar, percentage);
-
-                // 手动打印每行，不使用格式化来处理颜色部分
-                print!("{}{}{}", mount_col, size_col, free_col);
-                print!("{}", usage_final);
-                println!("{}", name_col);
+                println!(
+                    "│ {:<width_mount$} │ {:>width_size$} │ {:>width_free$} │ {} {:>3} │ {:<width_name$} │",
+                    mount_text, size_text, free_text, colored_bar, percentage, name_text,
+                    width_mount = max_mount_len,
+                    width_size = max_size_len,
+                    width_free = max_free_len,
+                    width_name = max_name_len
+                );
             }
 
             println!(
-                "└{:─<22}┴{:─<10}┴{:─<10}┴{:─<56}┴{:─<14}┘",
-                "", "", "", "", ""
+                "└{:─<width_mount$}┴{:─<width_size$}┴{:─<width_free$}┴{:─<width_usage$}┴{:─<width_name$}┘",
+                "", "", "", "", "",
+                width_mount = max_mount_len + 2,
+                width_size = max_size_len + 2,
+                width_free = max_free_len + 2,
+                width_usage = usage_len + 2,
+                width_name = max_name_len + 2
             );
         }
         OutputMode::Normal => {
