@@ -84,11 +84,10 @@ fn main() {
     let matches = Command::new("ndf")
         .about("Nice disk free.")
         .arg(
-            Arg::new("output")
-                .long("output")
+            Arg::new("mode")
                 .value_parser(value_parser!(OutputMode))
-                .default_value("normal")
-                .help("Output mode: normal | compact | table"),
+                .default_value("table")
+                .help("Display mode: normal | compact | table"),
         )
         .arg(
             Arg::new("only-mp")
@@ -104,7 +103,7 @@ fn main() {
         )
         .get_matches();
 
-    let output_mode = *matches.get_one::<OutputMode>("output").unwrap();
+    let output_mode = *matches.get_one::<OutputMode>("mode").unwrap();
 
     let only_mp: Option<HashSet<_>> = matches
         .get_one::<String>("only-mp")
