@@ -84,6 +84,7 @@ fn format_size(size: u64) -> String {
 struct DiskUsage {
     total: u64,
     free: u64,
+    fs_type: u32,  // File system type identifier (0 on non-Linux systems)
 }
 
 // Get disk usage for a given path using standard library
@@ -97,18 +98,42 @@ fn get_disk_usage_for_path(path: &str) -> std::io::Result<DiskUsage> {
         let c_path = CString::new(path.as_bytes())
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid path"))?;
 
-        let mut statvfs_buf: libc::statvfs = unsafe { mem::zeroed() };
-        let result = unsafe {
-            libc::statvfs(c_path.as_ptr(), &mut statvfs_buf)
-        };
+        // On Linux, we use statfs which provides filesystem type
+        #[cfg(target_os = "linux")]
+        {
+            let mut statfs_buf: libc::statfs = unsafe { mem::zeroed() };
+            let result = unsafe {
+                libc::statfs(c_path.as_ptr(), &mut statfs_buf)
+            };
 
-        if result == 0 {
-            Ok(DiskUsage {
-                total: (statvfs_buf.f_frsize as u64) * (statvfs_buf.f_blocks as u64),
-                free: (statvfs_buf.f_frsize as u64) * (statvfs_buf.f_bavail as u64),
-            })
-        } else {
-            Err(std::io::Error::last_os_error())
+            if result == 0 {
+                Ok(DiskUsage {
+                    total: (statfs_buf.f_bsize as u64) * (statfs_buf.f_blocks as u64),
+                    free: (statfs_buf.f_bsize as u64) * (statfs_buf.f_bavail as u64),
+                    fs_type: statfs_buf.f_type as u32,
+                })
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        }
+
+        // On other Unix systems (like macOS), we use statvfs
+        #[cfg(not(target_os = "linux"))]
+        {
+            let mut statvfs_buf: libc::statvfs = unsafe { mem::zeroed() };
+            let result = unsafe {
+                libc::statvfs(c_path.as_ptr(), &mut statvfs_buf)
+            };
+
+            if result == 0 {
+                Ok(DiskUsage {
+                    total: (statvfs_buf.f_frsize as u64) * (statvfs_buf.f_blocks as u64),
+                    free: (statvfs_buf.f_frsize as u64) * (statvfs_buf.f_bavail as u64),
+                    fs_type: 0,  // Not available on non-Linux systems
+                })
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
         }
     }
 
@@ -171,7 +196,8 @@ fn main() {
         // Skip system internal mount points that are not meaningful to users
         if mnt.starts_with("/private/") || mnt.starts_with("/sys/") ||
            mnt.starts_with("/proc/") || mnt.starts_with("/run/") ||
-           mnt.starts_with("/boot/") || mnt.starts_with("/var/") && mnt != "/var" {
+           mnt.starts_with("/boot/") || mnt.starts_with("/var/") && mnt != "/var" ||
+           mnt.starts_with("/snap/") || mnt == "/run" {
             continue;
         }
 
@@ -225,8 +251,38 @@ fn main() {
 
                     // Additionally, skip virtual filesystems that might be detected by mountpoints
                     // Check if the mount point is accessible and represents actual storage
-                    if mount_str == "/dev" {
-                        continue;  // Skip /dev which is a virtual filesystem
+                    if mount_str == "/dev" || mount_str.starts_with("/snap/") || mount_str == "/run" {
+                        continue;  // Skip /dev which is a virtual filesystem, snap packages, and /run
+                    }
+
+                    // Define constants for filesystem types (from sys/magic.h on Linux)
+                    const TMPFS_MAGIC: u32 = 0x01021994;
+                    const DEVPTS_MAGIC: u32 = 0x1cd1;
+                    const SYSFS_MAGIC: u32 = 0x62656572;
+                    const PROC_MAGIC: u32 = 0x9fa0;
+                    const DEVFS_MAGIC: u32 = 0x1373;
+                    const RAMFS_MAGIC: u32 = 0x858458f6;
+                    const SECURITYFS_MAGIC: u32 = 0x73636673;
+                    const CGROUP_MAGIC: u32 = 0x27e0eb;
+                    const CGROUP2_MAGIC: u32 = 0x63677270;
+                    const OVERLAYFS_SUPER_MAGIC: u32 = 0x794c7630;
+                    const FUSECTL_SUPER_MAGIC: u32 = 0x65735543;
+
+                    // Skip virtual filesystems based on filesystem type
+                    if cfg!(target_os = "linux") && (
+                        usage.fs_type == TMPFS_MAGIC ||
+                        usage.fs_type == DEVPTS_MAGIC ||
+                        usage.fs_type == SYSFS_MAGIC ||
+                        usage.fs_type == PROC_MAGIC ||
+                        usage.fs_type == DEVFS_MAGIC ||
+                        usage.fs_type == RAMFS_MAGIC ||
+                        usage.fs_type == SECURITYFS_MAGIC ||
+                        usage.fs_type == CGROUP_MAGIC ||
+                        usage.fs_type == CGROUP2_MAGIC ||
+                        usage.fs_type == OVERLAYFS_SUPER_MAGIC ||
+                        usage.fs_type == FUSECTL_SUPER_MAGIC
+                    ) {
+                        continue;  // Skip virtual filesystems
                     }
 
                     // Handle special cases for network mounts where usage stats might be unreliable
@@ -237,13 +293,18 @@ fn main() {
                         // Create an NDFDisk for this mount point
                         let frac = get_frac(usage.free, usage.total);
                         let mount_name = mount_str.split('/').last().unwrap_or("<unknown>").to_string();
-                        disks.push(NDFDisk {
-                            name: mount_name,
-                            space_as_frac: frac,
-                            mnt: mount_str.clone(),
-                            size: usage.total,
-                            free: usage.free,
-                        });
+
+                        // Check if this mount point is already added to avoid duplicates
+                        if !processed_mounts.contains(&mount_str) {
+                            disks.push(NDFDisk {
+                                name: mount_name,
+                                space_as_frac: frac,
+                                mnt: mount_str.clone(),
+                                size: usage.total,
+                                free: usage.free,
+                            });
+                            processed_mounts.insert(mount_str);
+                        }
                     } else if usage.total > 0 && usage.free > usage.total {
                         // Special case: free > total (common with network shares)
                         // We'll try to get more accurate info by checking if the path is accessible
@@ -252,13 +313,18 @@ fn main() {
                             // but calculate usage differently - maybe show as low usage
                             let frac = 0.1; // Assume low usage if free > total
                             let mount_name = mount_str.split('/').last().unwrap_or("<unknown>").to_string();
-                            disks.push(NDFDisk {
-                                name: mount_name,
-                                space_as_frac: frac,
-                                mnt: mount_str.clone(),
-                                size: usage.total,
-                                free: usage.free,
-                            });
+
+                            // Check if this mount point is already added to avoid duplicates
+                            if !processed_mounts.contains(&mount_str) {
+                                disks.push(NDFDisk {
+                                    name: mount_name,
+                                    space_as_frac: frac,
+                                    mnt: mount_str.clone(),
+                                    size: usage.total,
+                                    free: usage.free,
+                                });
+                                processed_mounts.insert(mount_str);
+                            }
                         }
                     }
                 }
