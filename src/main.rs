@@ -80,6 +80,46 @@ fn format_size(size: u64) -> String {
     }
 }
 
+// Define a struct to hold disk usage information
+struct DiskUsage {
+    total: u64,
+    free: u64,
+}
+
+// Get disk usage for a given path using standard library
+fn get_disk_usage_for_path(path: &str) -> std::io::Result<DiskUsage> {
+    use std::mem;
+
+    #[cfg(unix)]
+    {
+        use std::ffi::CString;
+
+        let c_path = CString::new(path.as_bytes())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid path"))?;
+
+        let mut statvfs_buf: libc::statvfs = unsafe { mem::zeroed() };
+        let result = unsafe {
+            libc::statvfs(c_path.as_ptr(), &mut statvfs_buf)
+        };
+
+        if result == 0 {
+            Ok(DiskUsage {
+                total: (statvfs_buf.f_frsize as u64) * (statvfs_buf.f_blocks as u64),
+                free: (statvfs_buf.f_frsize as u64) * (statvfs_buf.f_bavail as u64),
+            })
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        // For non-Unix systems, we'll return an error for now
+        // In a full implementation, we would use platform-specific APIs like GetDiskFreeSpaceEx on Windows
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "Platform not supported"))
+    }
+}
+
 fn main() {
     let matches = Command::new("ndf")
         .about("Nice disk free.")
@@ -114,12 +154,27 @@ fn main() {
         .map(|s| s.split(',').map(|s| s.trim().to_string()).collect());
 
     let mut disks: Vec<NDFDisk> = Vec::new();
+    let mut processed_mounts = std::collections::HashSet::new();
+
+    // Process disks from sysinfo first
     for disk in Disks::new_with_refreshed_list().list() {
         let mnt = disk.mount_point().to_string_lossy();
-        // ignore overlay and snap mounts
-        if disk.file_system() == "overlay" || mnt.starts_with("/var/snap/") {
+        processed_mounts.insert(mnt.to_string());
+
+        let fs_type = disk.file_system().to_string_lossy().to_string();
+
+        // ignore overlay, devfs and snap mounts, but allow CIFS/SMB mounts
+        if fs_type == "overlay" || fs_type == "devfs" || mnt.starts_with("/var/snap/") {
             continue;
         }
+
+        // Skip system internal mount points that are not meaningful to users
+        if mnt.starts_with("/private/") || mnt.starts_with("/sys/") ||
+           mnt.starts_with("/proc/") || mnt.starts_with("/run/") ||
+           mnt.starts_with("/boot/") || mnt.starts_with("/var/") && mnt != "/var" {
+            continue;
+        }
+
         if let Some(ref only) = only_mp {
             if !only.contains(mnt.as_ref()) {
                 continue;
@@ -131,6 +186,84 @@ fn main() {
             }
         }
         disks.push(NDFDisk::create_ndf_disk(disk));
+    }
+
+    // Now get all mount points using mountpoints crate to catch network mounts that sysinfo might miss
+    if let Ok(mount_paths) = mountpoints::mountpaths() {
+        for mount_path in mount_paths {
+            let mount_str = mount_path.to_string_lossy().to_string();
+
+            // Skip if already processed by sysinfo
+            if processed_mounts.contains(&mount_str) {
+                continue;
+            }
+
+            // Attempt to get disk usage for this mount point
+            if let Ok(_metadata) = std::fs::metadata(&mount_path) {
+                if let Ok(usage) = get_disk_usage_for_path(&mount_str) {
+
+                    // Apply filters
+                    if let Some(ref only) = only_mp {
+                        if !only.contains(&mount_str) {
+                            continue;
+                        }
+                    }
+                    if let Some(ref exclude) = exclude_mp {
+                        if exclude.contains(&mount_str) {
+                            continue;
+                        }
+                    }
+
+                    // Skip system internal mount points
+                    if mount_str.starts_with("/System/Volumes/") && mount_str != "/System/Volumes/Data" ||
+                       mount_str.starts_with("/dev/") || mount_str.starts_with("/private/") ||
+                       mount_str.starts_with("/sys/") || mount_str.starts_with("/proc/") ||
+                       mount_str.starts_with("/run/") || mount_str.starts_with("/boot/") ||
+                       mount_str.starts_with("/var/snap/") || mount_str.starts_with("/var/") && mount_str != "/var" {
+                        continue;
+                    }
+
+                    // Additionally, skip virtual filesystems that might be detected by mountpoints
+                    // Check if the mount point is accessible and represents actual storage
+                    if mount_str == "/dev" {
+                        continue;  // Skip /dev which is a virtual filesystem
+                    }
+
+                    // Handle special cases for network mounts where usage stats might be unreliable
+                    if usage.total == 0 && usage.free == 0 {
+                        // Skip mount points that report zero bytes for both
+                    } else if usage.total > 0 && usage.free <= usage.total {
+                        // Regular case: total >= free
+                        // Create an NDFDisk for this mount point
+                        let frac = get_frac(usage.free, usage.total);
+                        let mount_name = mount_str.split('/').last().unwrap_or("<unknown>").to_string();
+                        disks.push(NDFDisk {
+                            name: mount_name,
+                            space_as_frac: frac,
+                            mnt: mount_str.clone(),
+                            size: usage.total,
+                            free: usage.free,
+                        });
+                    } else if usage.total > 0 && usage.free > usage.total {
+                        // Special case: free > total (common with network shares)
+                        // We'll try to get more accurate info by checking if the path is accessible
+                        if std::path::Path::new(&mount_str).exists() {
+                            // For network mounts where free > total, we'll show the total as reported
+                            // but calculate usage differently - maybe show as low usage
+                            let frac = 0.1; // Assume low usage if free > total
+                            let mount_name = mount_str.split('/').last().unwrap_or("<unknown>").to_string();
+                            disks.push(NDFDisk {
+                                name: mount_name,
+                                space_as_frac: frac,
+                                mnt: mount_str.clone(),
+                                size: usage.total,
+                                free: usage.free,
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
 
     println!("{}", "ndf - nice disk free".bold());
